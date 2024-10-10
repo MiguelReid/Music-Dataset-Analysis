@@ -39,10 +39,42 @@ topic: The central topic or theme of the song (may be a categorization or descri
 age: The age or time period since the song was released. Oldest song from 1950 is 1
 """
 
+print(df.shape)
 # We can observe there's 0 values with null values and 0 duplicates
 # print(df.isnull().sum())
 # print('Duplicated values -> ', df.duplicated().sum())
+# We observe there's no NaN values in the DataFrame
+"""
+filt = (df['release_date'].isna()) & \
+    (df['age'].isna()) & \
+    (df['len'].isna()) & \
+    (df['dating'].isna()) & \
+    (df['violence'].isna()) & \
+    (df['world/life'].isna()) & \
+    (df['night/time'].isna()) & \
+    (df['shake the audience'].isna()) & \
+    (df['family/gospel'].isna()) & \
+    (df['romantic'].isna()) & \
+    (df['communication'].isna()) & \
+    (df['obscene'].isna()) & \
+    (df['music'].isna()) & \
+    (df['movement/places'].isna()) & \
+    (df['light/visual perceptions'].isna()) & \
+    (df['family/spiritual'].isna()) & \
+    (df['like/girls'].isna()) & \
+    (df['sadness'].isna()) & \
+    (df['feelings'].isna()) & \
+    (df['danceability'].isna()) & \
+    (df['loudness'].isna()) & \
+    (df['acousticness'].isna()) & \
+    (df['instrumentalness'].isna()) & \
+    (df['valence'].isna()) & \
+    (df['energy'].isna())
 
+# Update the DataFrame to remove rows with NaN values in the specified columns
+df = df[~filt]
+print(df.shape)
+"""
 
 ######## MOST COMMON TRACK_NAMES #########
 duplicated_tracks = df[df.duplicated(subset='track_name', keep=False)]
@@ -80,7 +112,9 @@ labels = most_common_topics.apply(lambda row: f"{row['genre']}: {row['topic']}",
 plt.figure(figsize=(10, 8))
 plt.pie(most_common_topics['counts'], labels=labels, autopct='%1.1f%%')
 plt.title('Most Common Topic per Genre')
-plt.show()
+
+
+# plt.show()
 #### MOST COMMON TOPIC PER GENRE #####
 
 
@@ -102,7 +136,7 @@ def find_most_similar_song(track_name):
     # Define the fields to compare
     fields = [
         'dating', 'violence', 'night/time', 'shake the audience', 'family/gospel',
-        'romantic', 'obscene', 'movement/places', 'family/spiritual', 'like/girls',
+        'romantic', 'obscene', 'family/spiritual',
         'sadness', 'feelings', 'danceability', 'loudness', 'acousticness',
         'instrumentalness', 'valence', 'energy'
     ]
@@ -128,8 +162,9 @@ def find_most_similar_song(track_name):
         'artist_name': most_similar_song['artist_name'],
         'release_date': most_similar_song['release_date'].item()
     }
-#### SIMILAR SONG FINDER ####
 
+
+#### SIMILAR SONG FINDER ####
 
 
 similar_song = find_most_similar_song(

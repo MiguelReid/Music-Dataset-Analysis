@@ -15,7 +15,7 @@ OUTCOME: 1 = Side A wins; 2 = Side B wins; 3 = Compromise; 4 = Transformed into 
 6 = Stalemate; 7 = Conflict continues at below war level
 Start/End Day,Month...For 2,3,4: When did it start after having stopped (-8 = N/A; -9 = Month Unknown)
 """
-
+from umap import UMAP
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
@@ -23,13 +23,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.svm import SVC
 
-# Look at UMAP
+country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
 
-# Load datasets
+# Intra War ------------------------------------------------
 wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
-
 
 # Combine year, month, and day into a single date column
 def drop_dates(df, prefix):
@@ -50,18 +48,28 @@ wars_df.drop(columns=['WarNum', 'WarName', 'Version'], inplace=True)
 
 # Drop rows whose CcodeA = -8 (Countries which do not exist anymore) EGYPT NOT THE SAME? 1881 is recognized
 wars_df = wars_df[wars_df['CcodeA'] != -8]
+# Intra War ------------------------------------------------
 
+
+# Resources ------------------------------------------------
 resources_df = pd.read_csv('datasets/national-material-capabilities.csv', encoding='latin1')
 
 # From resources drop version, stateabb
 resources_df.drop(columns=['version', 'stateabb'], inplace=True)
+# Resources ------------------------------------------------
 
-country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
+
+# Polity5 ------------------------------------------------
+polity5_df = pd.read_excel('datasets/polity5.xls',  skiprows=3)
+polity5_df.drop(columns=['p5', 'year'], inplace=True)
+# Polity5 ------------------------------------------------
+
 
 # 2. Remove Duplicates
 wars_df.drop_duplicates(inplace=True)
 resources_df.drop_duplicates(inplace=True)
 country_codes_df.drop_duplicates(inplace=True)
+polity5_df.drop_duplicates(inplace=True)
 
 # Change Initiator values to 0, 1, 2
 wars_df['Initiator'] = wars_df.apply(
@@ -123,6 +131,7 @@ model.fit(X_train, y_train)
 # Predict and evaluate
 y_pred = model.predict(X_test)
 print(confusion_matrix(y_test, y_pred))
+print('---------------------------')
 print(classification_report(y_test, y_pred))
 
 # Predict war probability for the latest available data
@@ -154,4 +163,16 @@ feature_importance_df = feature_importance_df.sort_values(by='Importance', ascen
 plt.figure(figsize=(10, 6))
 sns.barplot(x='Importance', y='Feature', data=feature_importance_df)
 plt.title('Feature Importance')
-# plt.show()
+
+# Fit and transform the scaled features using UMAP
+umap_model = UMAP(n_neighbors=15, n_components=2, random_state=42, n_jobs=1)
+X_umap = umap_model.fit_transform(X_scaled)
+
+# Plot the UMAP projection
+plt.figure(figsize=(10, 6))
+plt.scatter(X_umap[:, 0], X_umap[:, 1], c=y, cmap='coolwarm', s=5)
+plt.title('UMAP Projection of Features')
+plt.xlabel('UMAP 1')
+plt.ylabel('UMAP 2')
+plt.colorbar(label='War Occurred')
+plt.show()

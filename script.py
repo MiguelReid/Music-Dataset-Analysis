@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
+country_codes_df.drop(columns=['StateAbb'], inplace=True)
 
 # Intra War ------------------------------------------------
 wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
@@ -60,7 +61,7 @@ resources_df.drop(columns=['version', 'stateabb'], inplace=True)
 
 
 # Polity5 ------------------------------------------------
-polity5_df = pd.read_excel('datasets/polity5.xls',  skiprows=3)
+polity5_df = pd.read_excel('datasets/polity5.xls')
 polity5_df.drop(columns=['p5', 'year'], inplace=True)
 # Polity5 ------------------------------------------------
 
@@ -140,7 +141,7 @@ latest_data_scaled = scaler.transform(last_year_df[features])
 last_year_df['WarProbability'] = model.predict_proba(latest_data_scaled)[:, 1]
 
 # Merge latest_data with country_codes_df to get country names
-last_year_df = pd.merge(last_year_df, country_codes_df[['CCode', 'StateNme']], left_on='ccode', right_on='CCode',
+last_year_df = pd.merge(last_year_df, country_codes_df, left_on='ccode', right_on='CCode',
                         how='left')
 
 # Rename 'StateNme' column to 'Country'
@@ -175,4 +176,4 @@ plt.title('UMAP Projection of Features')
 plt.xlabel('UMAP 1')
 plt.ylabel('UMAP 2')
 plt.colorbar(label='War Occurred')
-plt.show()
+# plt.show()

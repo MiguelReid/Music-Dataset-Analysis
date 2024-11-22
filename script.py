@@ -24,15 +24,20 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+# Country Codes --------------------------------------------
 country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
 country_codes_df.drop(columns=['StateAbb'], inplace=True)
+# From duplicated().sum() we see only country codes are duplicated
+country_codes_df.drop_duplicates(inplace=True)
+# Country Codes --------------------------------------------
+
 
 # Intra War ------------------------------------------------
 wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
 
-# Combine year, month, and day into a single date column
+
+# I only need the years to separate the data into non-war and war years
 def drop_dates(df, prefix):
-    # I only need the years to separate the data into non war and war years
     columns_to_drop = [
         f'StartMo{prefix}', f'StartDy{prefix}',
         f'EndMo{prefix}', f'EndDy{prefix}'
@@ -40,15 +45,25 @@ def drop_dates(df, prefix):
     df.drop(columns=columns_to_drop, inplace=True)
 
 
-# Loop through different indexes
+# Drop the non-year dates
 for i in range(1, 5):
     drop_dates(wars_df, i)
 
-# From wars drop WarNum, WarName, Version
-wars_df.drop(columns=['WarNum', 'WarName', 'Version'], inplace=True)
+# Drop unimportant columns
+wars_df.drop(columns=['WarNum', 'WarName', 'Version', 'WDuratDays', 'WDuratMo', 'TotNatMonWar', 'TransTo', 'TransFrom',
+                      'DeathsSideA', 'DeathsSideB', 'TotalBDeaths'], inplace=True)
 
-# Drop rows whose CcodeA = -8 (Countries which do not exist anymore) EGYPT NOT THE SAME? 1881 is recognized
+# Drop countries which do not exist anymore EGYPT NOT THE SAME? 1881 is recognized
 wars_df = wars_df[wars_df['CcodeA'] != -8]
+
+# Change Initiator values to 0, 1, 2
+wars_df['Initiator'] = wars_df.apply(
+    lambda row: 0 if row['Initiator'] == row['SideA']
+    else 1 if row['Initiator'] == row['SideB']
+    else 2, axis=1
+)
+
+wars_df.drop(columns=['SideB'], inplace=True)
 # Intra War ------------------------------------------------
 
 
@@ -61,23 +76,11 @@ resources_df.drop(columns=['version', 'stateabb'], inplace=True)
 
 
 # Polity5 ------------------------------------------------
-polity5_df = pd.read_excel('datasets/polity5.xls')
-polity5_df.drop(columns=['p5', 'year'], inplace=True)
+polity5_df = pd.read_csv('datasets/polity5.csv')
+polity5_df.drop(columns=['p5', 'cyear'], inplace=True)
+
+
 # Polity5 ------------------------------------------------
-
-
-# 2. Remove Duplicates
-wars_df.drop_duplicates(inplace=True)
-resources_df.drop_duplicates(inplace=True)
-country_codes_df.drop_duplicates(inplace=True)
-polity5_df.drop_duplicates(inplace=True)
-
-# Change Initiator values to 0, 1, 2
-wars_df['Initiator'] = wars_df.apply(
-    lambda row: 0 if row['Initiator'] == row['SideA']
-    else 1 if row['Initiator'] == row['SideB']
-    else 2, axis=1
-)
 
 
 # Function to generate a war-year indicator for each country
@@ -98,19 +101,44 @@ def label_war_years(war_df, df):
                 is_war_year = 1
                 break
 
-        labeled_data.append({'ccode': country, 'year': year, 'War_Occurred': is_war_year})
+        labeled_data.append({'ccode': country, 'year': year, 'War_Occurred': is_war_year, 'milex': row['milex'],
+                             'milper': row['milper'], 'irst': row['irst'], 'pec': row['pec'], 'tpop': row['tpop'],
+                             'upop': row['upop'], 'cinc': row['cinc']})
 
     return pd.DataFrame(labeled_data)
 
 
 # Apply function to label war and non-war years
 labeled_df = label_war_years(wars_df, resources_df)
+labeled_df = pd.merge(labeled_df, wars_df, left_on='ccode', right_on='CcodeA', how='left')
 
-# Merge the labeled data with national material capabilities
-merged_df = pd.merge(labeled_df, resources_df, on=['ccode', 'year'])
+# Names for merging with POLITY5
+merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CCode', how='left')
+
+# Rename 'StateNme' column to 'Country'
+merged_df.rename(columns={'StateNme': 'Country'}, inplace=True)
+
+# Merge the labeled data with polity5
+merged_df = pd.merge(merged_df, polity5_df, left_on=['Country', 'year'], right_on=['country', 'year'],
+                     how='left')
+
+# Drop every redundant, repeated and unnecessary column
+merged_df.drop(columns=['ccode_x', 'ccode_y', 'CCode', 'Country'], inplace=True)
+
+# Some names won't be the same due to different naming conventions so we'll get rid of them
+merged_df = merged_df[merged_df['country'].notnull()]
+
+# Save merged_df to a CSV file
+merged_df.to_csv('datasets/merged-data.csv', index=False)
+
+# ML MODEL --------------------------------------------
 
 # Select features and target
-features = ['milex', 'milper', 'irst', 'pec', 'tpop', 'upop', 'cinc']
+features = [
+    'milex', 'milper', 'irst', 'pec', 'tpop', 'upop', 'cinc',  # Material capabilities
+    'WarType', 'Intnl', 'Outcome', 'V5RegionNum', # From wars dataset
+    'polity', 'polity2', 'durable', 'xrreg', 'xrcomp', 'xropen', 'polcomp',  # From Polity5 dataset
+]
 target = 'War_Occurred'
 
 # Split into training and testing data
@@ -136,19 +164,14 @@ print('---------------------------')
 print(classification_report(y_test, y_pred))
 
 # Predict war probability for the latest available data
-last_year_df = resources_df.loc[resources_df.groupby('ccode')['year'].idxmax()].reset_index(drop=True)
+last_year_df = merged_df.loc[merged_df.groupby('country')['year'].idxmax()].reset_index(drop=True)
 latest_data_scaled = scaler.transform(last_year_df[features])
 last_year_df['WarProbability'] = model.predict_proba(latest_data_scaled)[:, 1]
 
-# Merge latest_data with country_codes_df to get country names
-last_year_df = pd.merge(last_year_df, country_codes_df, left_on='ccode', right_on='CCode',
-                        how='left')
-
-# Rename 'StateNme' column to 'Country'
-last_year_df.rename(columns={'StateNme': 'Country'}, inplace=True)
+print(last_year_df.columns)
 
 # Display the updated latest_data with country names
-print(last_year_df[['Country', 'WarProbability']].to_string())
+print(last_year_df[['country', 'WarProbability']].to_string())
 
 # PLOTTING -----------------------------
 
@@ -158,12 +181,24 @@ feature_names = features
 
 # Create a DataFrame for plotting
 feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=True)
 
 # Plot feature importances
 plt.figure(figsize=(10, 6))
 sns.barplot(x='Importance', y='Feature', data=feature_importance_df)
 plt.title('Feature Importance')
+
+
+# Check for NaN values in the DataFrame
+nan_counts = merged_df.isna().sum()
+
+# Filter columns that have NaN values
+nan_columns = nan_counts[nan_counts > 0]
+
+# Print the columns with NaN values and their counts
+print(nan_columns)
+"""
+
 
 # Fit and transform the scaled features using UMAP
 umap_model = UMAP(n_neighbors=15, n_components=2, random_state=42, n_jobs=1)
@@ -176,4 +211,5 @@ plt.title('UMAP Projection of Features')
 plt.xlabel('UMAP 1')
 plt.ylabel('UMAP 2')
 plt.colorbar(label='War Occurred')
-# plt.show()
+"""
+plt.show()

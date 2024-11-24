@@ -15,33 +15,38 @@ OUTCOME: 1 = Side A wins; 2 = Side B wins; 3 = Compromise; 4 = Transformed into 
 6 = Stalemate; 7 = Conflict continues at below war level
 Start/End Day,Month...For 2,3,4: When did it start after having stopped (-8 = N/A; -9 = Month Unknown)
 """
-from umap import UMAP
 import pandas as pd
+from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, classification_report
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
+wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
+polity5_df = pd.read_csv('datasets/polity5.csv')
+resources_df = pd.read_csv('datasets/national-material-capabilities.csv', encoding='latin1')
+
+# Limit every dataset to the years 1818-2014 (Range of intra-state-wars)
+polity5_df = polity5_df[(polity5_df['year'] >= 1818) & (polity5_df['year'] <= 2014)]
+resources_df = resources_df[(resources_df['year'] >= 1818) & (resources_df['year'] <= 2014)]
 
 # Country Codes --------------------------------------------
-country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
 country_codes_df.drop(columns=['StateAbb'], inplace=True)
 # From duplicated().sum() we see only country codes are duplicated
 country_codes_df.drop_duplicates(inplace=True)
+
+
 # Country Codes --------------------------------------------
 
 
 # Intra War ------------------------------------------------
-wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
-
-
 # I only need the years to separate the data into non-war and war years
 def drop_dates(df, prefix):
     columns_to_drop = [
         f'StartMo{prefix}', f'StartDy{prefix}',
         f'EndMo{prefix}', f'EndDy{prefix}'
     ]
+
     df.drop(columns=columns_to_drop, inplace=True)
 
 
@@ -64,20 +69,36 @@ wars_df['Initiator'] = wars_df.apply(
 )
 
 wars_df.drop(columns=['SideB'], inplace=True)
+
+# Print how many -8 or -9 values does each column have
+# print('CHECK -> ',wars_df.isin([-8, -9]).sum())
+
+
 # Intra War ------------------------------------------------
 
 
 # Resources ------------------------------------------------
-resources_df = pd.read_csv('datasets/national-material-capabilities.csv', encoding='latin1')
-
 # From resources drop version, stateabb
 resources_df.drop(columns=['version', 'stateabb'], inplace=True)
+
+# Replace every -9 value with the mean of their column
+columns_to_replace = [
+    'milex', 'milper', 'irst', 'pec', 'tpop', 'upop', 'cinc'
+]
+
+for column in columns_to_replace:
+    resources_df[column] = resources_df.groupby('ccode')[column].transform(lambda x: x.replace(-9, x.mean()))
+
 # Resources ------------------------------------------------
 
 
 # Polity5 ------------------------------------------------
-polity5_df = pd.read_csv('datasets/polity5.csv')
-polity5_df.drop(columns=['p5', 'cyear'], inplace=True)
+# Drop these columns with high number of NaN values
+polity5_df.drop(columns=['fragment', 'prior', 'emonth', 'eday', 'eyear', 'eprec', 'interim', 'bmonth', 'bday', 'byear',
+                         'bprec', 'post', 'change', 'd5', 'sf', 'regtrans', 'p5', 'cyear'], inplace=True)
+
+# Correlates of war only has records until 2016
+polity5_df = polity5_df[polity5_df['year'] <= 2016]
 
 
 # Polity5 ------------------------------------------------
@@ -108,108 +129,110 @@ def label_war_years(war_df, df):
     return pd.DataFrame(labeled_data)
 
 
-# Apply function to label war and non-war years
+# Label war and non-war years
 labeled_df = label_war_years(wars_df, resources_df)
-labeled_df = pd.merge(labeled_df, wars_df, left_on='ccode', right_on='CcodeA', how='left')
+# Changed to inner join
+labeled_df = pd.merge(labeled_df, wars_df[['CcodeA', 'WarType', 'Intnl', 'Outcome', 'V5RegionNum']], left_on='ccode',
+                      right_on='CcodeA', how='inner')
+
+labeled_df.drop(columns=['CcodeA'], inplace=True)
 
 # Names for merging with POLITY5
 merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CCode', how='left')
 
-# Rename 'StateNme' column to 'Country'
-merged_df.rename(columns={'StateNme': 'Country'}, inplace=True)
-
 # Merge the labeled data with polity5
-merged_df = pd.merge(merged_df, polity5_df, left_on=['Country', 'year'], right_on=['country', 'year'],
+merged_df = pd.merge(merged_df, polity5_df, left_on=['StateNme', 'year'], right_on=['country', 'year'],
                      how='left')
 
 # Drop every redundant, repeated and unnecessary column
-merged_df.drop(columns=['ccode_x', 'ccode_y', 'CCode', 'Country'], inplace=True)
+merged_df.drop(columns=['ccode_x', 'ccode_y', 'CCode', 'StateNme', 'scode'], inplace=True)
 
 # Some names won't be the same due to different naming conventions so we'll get rid of them
 merged_df = merged_df[merged_df['country'].notnull()]
 
-# Save merged_df to a CSV file
+# Replace missing values with NaN
+merged_df.replace([-66, -77, -88], pd.NA, inplace=True)
+columns_to_replace = [
+    'democ', 'autoc', 'polity', 'polity2', 'durable', 'xrreg', 'xrcomp',
+    'xropen', 'xconst', 'parreg', 'parcomp', 'exrec', 'exconst', 'polcomp'
+]
+
+for column in columns_to_replace:
+    merged_df[column] = merged_df.groupby('V5RegionNum')[column].transform(lambda x: x.fillna(x.mean()))
+# Save the updated DataFrame to a CSV file
 merged_df.to_csv('datasets/merged-data.csv', index=False)
 
 # ML MODEL --------------------------------------------
 
-# Select features and target
+# Select lagged features and drop war-related features
 features = [
-    'milex', 'milper', 'irst', 'pec', 'tpop', 'upop', 'cinc',  # Material capabilities
-    'WarType', 'Intnl', 'Outcome', 'V5RegionNum', # From wars dataset
-    'polity', 'polity2', 'durable', 'xrreg', 'xrcomp', 'xropen', 'polcomp',  # From Polity5 dataset
+    'polity', 'polity2',  # Indicators of political regime type
+    'democ', 'autoc',  # Democracy and autocracy score
+    'durable',  # Uninterrupted years of stability
+    'xrreg', 'xrcomp', 'xropen',  # External regime features
+    'polcomp',  # Political competition
+    'milex',  # Military expenditures
+    'milper',  # Military personnel
+    'irst',  # Industrial production
+    'pec',  # Primary energy consumption
+    'tpop',  # Total population
+    'upop',  # Urban population
+    'cinc',  # Composite Index of National Capabilities
+    'V5RegionNum'  # Intra-War-Dataset
 ]
 target = 'War_Occurred'
 
-# Split into training and testing data
-X = merged_df[features]
-y = merged_df[target]
+# Train-test split by year
+train_data = merged_df[merged_df['year'] < 2010]
+test_data = merged_df[merged_df['year'] >= 2010]
 
-# Scale the features
+X_train = train_data[features].dropna()
+y_train = train_data[target].loc[X_train.index]
+
+X_test = test_data[features].dropna()
+y_test = test_data[target].loc[X_test.index]
+
+# Handle class imbalance using SMOTE
+smote = SMOTE(random_state=42)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+
+# Scale data
 scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+X_train_scaled = scaler.fit_transform(X_train_resampled)
+X_test_scaled = scaler.transform(X_test)
 
-# Split data
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-# 80% train 20% test
+# Train model with balanced weights
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+model.fit(X_train_scaled, y_train_resampled)
 
-# Train the model
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
+# Evaluate on test data
+y_pred = model.predict(X_test_scaled)
+y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
 
-# Predict and evaluate
-y_pred = model.predict(X_test)
-print(confusion_matrix(y_test, y_pred))
-print('---------------------------')
 print(classification_report(y_test, y_pred))
+print(f"ROC-AUC Score: {roc_auc_score(y_test, y_pred_proba)}")
+
 
 # Predict war probability for the latest available data
 last_year_df = merged_df.loc[merged_df.groupby('country')['year'].idxmax()].reset_index(drop=True)
 latest_data_scaled = scaler.transform(last_year_df[features])
 last_year_df['WarProbability'] = model.predict_proba(latest_data_scaled)[:, 1]
 
-print(last_year_df.columns)
+# Print the country, year, and predicted percentage of WarProbability over 0.0
+last_year_df['WarProbability'] = last_year_df['WarProbability'] * 100
+print(last_year_df[last_year_df['WarProbability'] > 0.0][['country', 'year', 'WarProbability']].to_string(index=False))
 
-# Display the updated latest_data with country names
-print(last_year_df[['country', 'WarProbability']].to_string())
+# PLOTTING --------------------------------------------
 
-# PLOTTING -----------------------------
+# Plot feature importance
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Get feature importances from the model
-importances = model.feature_importances_
-feature_names = features
+feature_importances = pd.DataFrame({
+    'Feature': features,
+    'Importance': model.feature_importances_
+}).sort_values(by='Importance', ascending=False)
 
-# Create a DataFrame for plotting
-feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=True)
-
-# Plot feature importances
-plt.figure(figsize=(10, 6))
-sns.barplot(x='Importance', y='Feature', data=feature_importance_df)
+sns.barplot(x='Importance', y='Feature', data=feature_importances)
 plt.title('Feature Importance')
-
-
-# Check for NaN values in the DataFrame
-nan_counts = merged_df.isna().sum()
-
-# Filter columns that have NaN values
-nan_columns = nan_counts[nan_counts > 0]
-
-# Print the columns with NaN values and their counts
-print(nan_columns)
-"""
-
-
-# Fit and transform the scaled features using UMAP
-umap_model = UMAP(n_neighbors=15, n_components=2, random_state=42, n_jobs=1)
-X_umap = umap_model.fit_transform(X_scaled)
-
-# Plot the UMAP projection
-plt.figure(figsize=(10, 6))
-plt.scatter(X_umap[:, 0], X_umap[:, 1], c=y, cmap='coolwarm', s=5)
-plt.title('UMAP Projection of Features')
-plt.xlabel('UMAP 1')
-plt.ylabel('UMAP 2')
-plt.colorbar(label='War Occurred')
-"""
 plt.show()

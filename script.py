@@ -20,6 +20,8 @@ from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, classification_report
 from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
 wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
@@ -69,11 +71,6 @@ wars_df['Initiator'] = wars_df.apply(
 )
 
 wars_df.drop(columns=['SideB'], inplace=True)
-
-# Print how many -8 or -9 values does each column have
-# print('CHECK -> ',wars_df.isin([-8, -9]).sum())
-
-
 # Intra War ------------------------------------------------
 
 
@@ -144,33 +141,36 @@ merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CC
 merged_df = pd.merge(merged_df, polity5_df, left_on=['StateNme', 'year'], right_on=['country', 'year'],
                      how='left')
 
-# Drop every redundant, repeated and unnecessary column
-merged_df.drop(columns=['ccode_x', 'ccode_y', 'CCode', 'StateNme', 'scode'], inplace=True)
-
 # Some names won't be the same due to different naming conventions so we'll get rid of them
 merged_df = merged_df[merged_df['country'].notnull()]
+
+# Drop every redundant, repeated and unnecessary column
+merged_df.drop(
+    columns=['ccode_x', 'ccode_y', 'CCode', 'StateNme', 'scode', 'Outcome', 'Intnl', 'WarType', 'flag', 'polity'],
+    inplace=True)
 
 # Replace missing values with NaN
 merged_df.replace([-66, -77, -88], pd.NA, inplace=True)
 columns_to_replace = [
-    'democ', 'autoc', 'polity', 'polity2', 'durable', 'xrreg', 'xrcomp',
+    'democ', 'autoc', 'polity2', 'durable', 'xrreg', 'xrcomp',
     'xropen', 'xconst', 'parreg', 'parcomp', 'exrec', 'exconst', 'polcomp'
 ]
 
 for column in columns_to_replace:
     merged_df[column] = merged_df.groupby('V5RegionNum')[column].transform(lambda x: x.fillna(x.mean()))
 # Save the updated DataFrame to a CSV file
-merged_df.to_csv('datasets/merged-data.csv', index=False)
+# merged_df.to_csv('datasets/merged-data.csv', index=False)
 
 # ML MODEL --------------------------------------------
 
 # Select lagged features and drop war-related features
 features = [
-    'polity', 'polity2',  # Indicators of political regime type
+    'polity2',  # Indicators of political regime type
     'democ', 'autoc',  # Democracy and autocracy score
     'durable',  # Uninterrupted years of stability
     'xrreg', 'xrcomp', 'xropen',  # External regime features
     'polcomp',  # Political competition
+    'parreg',  # Party regulation
     'milex',  # Military expenditures
     'milper',  # Military personnel
     'irst',  # Industrial production
@@ -212,22 +212,29 @@ y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
 print(classification_report(y_test, y_pred))
 print(f"ROC-AUC Score: {roc_auc_score(y_test, y_pred_proba)}")
 
-
 # Predict war probability for the latest available data
 last_year_df = merged_df.loc[merged_df.groupby('country')['year'].idxmax()].reset_index(drop=True)
 latest_data_scaled = scaler.transform(last_year_df[features])
 last_year_df['WarProbability'] = model.predict_proba(latest_data_scaled)[:, 1]
 
-# Print the country, year, and predicted percentage of WarProbability over 0.0
-last_year_df['WarProbability'] = last_year_df['WarProbability'] * 100
-print(last_year_df[last_year_df['WarProbability'] > 0.0][['country', 'year', 'WarProbability']].to_string(index=False))
+# Print the country, year, and predicted percentage of WarProbability over 0.0 and sort by WarProbability
+print(last_year_df[last_year_df['WarProbability'] > 0.0].sort_values(by='WarProbability', ascending=False)[
+          ['country', 'year', 'WarProbability']].to_string())
+
+# Select only numeric columns for the correlation matrix
+numeric_columns = merged_df.select_dtypes(include=['number'])
+
+# Calculate the correlation matrix
+correlation_matrix = numeric_columns.corr()
+
+# Plot the heatmap
+plt.figure(figsize=(12, 10))
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+plt.title('Correlation Matrix')
 
 # PLOTTING --------------------------------------------
 
-# Plot feature importance
-import matplotlib.pyplot as plt
-import seaborn as sns
-
+# Feature Importance
 feature_importances = pd.DataFrame({
     'Feature': features,
     'Importance': model.feature_importances_
@@ -235,4 +242,79 @@ feature_importances = pd.DataFrame({
 
 sns.barplot(x='Importance', y='Feature', data=feature_importances)
 plt.title('Feature Importance')
+
+# Mapping of V5RegionNum to region names
+region_mapping = {
+    1: 'North America',
+    2: 'South America',
+    3: 'Europe',
+    4: 'Sub-Saharan Africa',
+    5: 'Middle East and North Africa',
+    6: 'Asia and Oceania'
+}
+
+# Calculate the average war probability for each V5RegionNum
+avg_war_prob_by_region = last_year_df.groupby('V5RegionNum')['WarProbability'].mean().reset_index()
+
+# Replace V5RegionNum with region names
+avg_war_prob_by_region['V5RegionNum'] = avg_war_prob_by_region['V5RegionNum'].map(region_mapping)
+
+# Pivot the data for the heatmap
+heatmap_data = avg_war_prob_by_region.pivot_table(index='V5RegionNum', values='WarProbability')
+
+# Create the heatmap
+plt.figure(figsize=(10, 6))
+sns.heatmap(heatmap_data, annot=True, cmap='YlGnBu', cbar_kws={'label': 'Average War Probability (%)'})
+plt.title('Average War Probability by Region')
+plt.xlabel('Region')
+plt.ylabel('Region')
+
+# Filter data for analysis
+analysis_data = last_year_df[['milex', 'pec', 'cinc', 'tpop', 'polity2', 'WarProbability']]
+
+# Plot 1: Scatter plot for 'tpop' vs. 'WarProbability'
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=analysis_data, x='tpop', y='WarProbability', alpha=0.7, color='blue', s=20)
+sns.regplot(data=analysis_data, x='tpop', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Total Population (tpop) and War Probability')
+plt.xlabel('Total Population (tpop)')
+plt.ylabel('War Probability (%)')
+plt.tight_layout()
+
+# Plot 2: Scatter plot for 'polity2' vs. 'WarProbability'
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=analysis_data, x='polity2', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=analysis_data, x='polity2', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Polity and War Probability')
+plt.xlabel('Polity')
+plt.ylabel('War Probability (%)')
+plt.tight_layout()
+
+# Plot 2: Scatter plot for 'cinc' vs. 'WarProbability'
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=analysis_data, x='cinc', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=analysis_data, x='cinc', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Cinc and War Probability')
+plt.xlabel('The Composite Index of National Capability (cinc)')
+plt.ylabel('War Probability (%)')
+plt.tight_layout()
+
+# Plot 1: Scatter plot for 'milex' vs. 'WarProbability'
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=analysis_data, x='milex', y='WarProbability', alpha=0.7, color='blue', s=20)
+sns.regplot(data=analysis_data, x='milex', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Military Expenditures (milex) and War Probability')
+plt.xlabel('Military Expenditures (milex)')
+plt.ylabel('War Probability (%)')
+plt.tight_layout()
+
+# Plot 2: Scatter plot for 'pec' vs. 'WarProbability'
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=analysis_data, x='pec', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=analysis_data, x='pec', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Primary Energy Consumption (pec) and War Probability')
+plt.xlabel('Primary Energy Consumption (pec)')
+plt.ylabel('War Probability (%)')
+plt.tight_layout()
+
 plt.show()

@@ -71,6 +71,11 @@ wars_df['Initiator'] = wars_df.apply(
 )
 
 wars_df.drop(columns=['SideB'], inplace=True)
+
+# Print how many -8 or -9 values does each column have
+# print('CHECK -> ',wars_df.isin([-8, -9]).sum())
+
+
 # Intra War ------------------------------------------------
 
 
@@ -141,13 +146,11 @@ merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CC
 merged_df = pd.merge(merged_df, polity5_df, left_on=['StateNme', 'year'], right_on=['country', 'year'],
                      how='left')
 
+# Drop every redundant, repeated and unnecessary column
+merged_df.drop(columns=['ccode_x', 'ccode_y', 'StateNme', 'scode'], inplace=True)
+
 # Some names won't be the same due to different naming conventions so we'll get rid of them
 merged_df = merged_df[merged_df['country'].notnull()]
-
-# Drop every redundant, repeated and unnecessary column
-merged_df.drop(
-    columns=['ccode_x', 'ccode_y', 'CCode', 'StateNme', 'scode', 'Outcome', 'Intnl', 'WarType', 'flag', 'polity'],
-    inplace=True)
 
 # Replace missing values with NaN
 merged_df.replace([-66, -77, -88], pd.NA, inplace=True)
@@ -157,9 +160,9 @@ columns_to_replace = [
 ]
 
 for column in columns_to_replace:
-    merged_df[column] = merged_df.groupby('V5RegionNum')[column].transform(lambda x: x.fillna(x.mean()))
+    merged_df[column] = merged_df.groupby('CCode')[column].transform(lambda x: x.fillna(x.mean()))
 # Save the updated DataFrame to a CSV file
-# merged_df.to_csv('datasets/merged-data.csv', index=False)
+merged_df.to_csv('datasets/merged-data.csv', index=False)
 
 # ML MODEL --------------------------------------------
 
@@ -221,6 +224,9 @@ last_year_df['WarProbability'] = model.predict_proba(latest_data_scaled)[:, 1]
 print(last_year_df[last_year_df['WarProbability'] > 0.0].sort_values(by='WarProbability', ascending=False)[
           ['country', 'year', 'WarProbability']].to_string())
 
+# PLOTTING --------------------------------------------
+
+"""
 # Select only numeric columns for the correlation matrix
 numeric_columns = merged_df.select_dtypes(include=['number'])
 
@@ -231,8 +237,6 @@ correlation_matrix = numeric_columns.corr()
 plt.figure(figsize=(12, 10))
 sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
 plt.title('Correlation Matrix')
-
-# PLOTTING --------------------------------------------
 
 # Feature Importance
 feature_importances = pd.DataFrame({
@@ -316,5 +320,5 @@ plt.title('Relationship Between Primary Energy Consumption (pec) and War Probabi
 plt.xlabel('Primary Energy Consumption (pec)')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
-
 plt.show()
+"""

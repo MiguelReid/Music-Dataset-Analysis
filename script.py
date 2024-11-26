@@ -101,8 +101,6 @@ polity5_df.drop(columns=['fragment', 'prior', 'emonth', 'eday', 'eyear', 'eprec'
 
 # Correlates of war only has records until 2016
 polity5_df = polity5_df[polity5_df['year'] <= 2016]
-
-
 # Polity5 ------------------------------------------------
 
 
@@ -129,7 +127,6 @@ def label_war_years(war_df, df):
                              'upop': row['upop'], 'cinc': row['cinc']})
 
     return pd.DataFrame(labeled_data)
-
 
 # Label war and non-war years
 labeled_df = label_war_years(wars_df, resources_df)
@@ -215,23 +212,27 @@ y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
 print(classification_report(y_test, y_pred))
 print(f"ROC-AUC Score: {roc_auc_score(y_test, y_pred_proba)}")
 
-# Predict war probability for the latest available data
-last_year_df = merged_df.loc[merged_df.groupby('country')['year'].idxmax()].reset_index(drop=True)
-latest_data_scaled = scaler.transform(last_year_df[features])
-last_year_df['WarProbability'] = model.predict_proba(latest_data_scaled)[:, 1]
+# Ensure features are properly prepared for the entire dataset
+X_all = merged_df[features].dropna()  # Drop rows with missing feature values
+
+# Scale the features using the trained scaler
+X_all_scaled = scaler.transform(X_all)
+
+# Predict WarProbability for all rows
+merged_df.loc[X_all.index, 'WarProbability'] = model.predict_proba(X_all_scaled)[:, 1]
+# Get only the last year of data in merged_df
+last_year_df = merged_df[merged_df['year'] == 2014]
 
 # Print the country, year, and predicted percentage of WarProbability over 0.0 and sort by WarProbability
 print(last_year_df[last_year_df['WarProbability'] > 0.0].sort_values(by='WarProbability', ascending=False)[
           ['country', 'year', 'WarProbability']].to_string())
-
 # PLOTTING --------------------------------------------
 
-"""
 # Select only numeric columns for the correlation matrix
 numeric_columns = merged_df.select_dtypes(include=['number'])
 
 # Calculate the correlation matrix
-correlation_matrix = numeric_columns.corr()
+correlation_matrix = X_all.corr()
 
 # Plot the heatmap
 plt.figure(figsize=(12, 10))
@@ -320,5 +321,15 @@ plt.title('Relationship Between Primary Energy Consumption (pec) and War Probabi
 plt.xlabel('Primary Energy Consumption (pec)')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
+
+# Calculate the average WarProbability for each year
+avg_war_prob_by_year = merged_df.groupby('year')['WarProbability'].mean().reset_index()
+# Plot the line chart
+plt.figure(figsize=(12, 6))
+plt.plot(avg_war_prob_by_year['year'], avg_war_prob_by_year['WarProbability'], marker='o', linestyle='-', color='b')
+plt.title('Trend of Average War Probability Over the Years')
+plt.xlabel('Year')
+plt.ylabel('Average War Probability')
+plt.grid(True)
+plt.tight_layout()
 plt.show()
-"""

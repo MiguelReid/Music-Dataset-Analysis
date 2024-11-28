@@ -15,25 +15,27 @@ OUTCOME: 1 = Side A wins; 2 = Side B wins; 3 = Compromise; 4 = Transformed into 
 6 = Stalemate; 7 = Conflict continues at below war level
 Start/End Day,Month...For 2,3,4: When did it start after having stopped (-8 = N/A; -9 = Month Unknown)
 """
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import seaborn as sns
 from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, classification_report
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
 wars_df = pd.read_csv('datasets/intra-state-wars.csv', encoding='latin1')
 polity5_df = pd.read_csv('datasets/polity5.csv')
 resources_df = pd.read_csv('datasets/national-material-capabilities.csv', encoding='latin1')
+religion_df = pd.read_csv('datasets/religion.csv', encoding='latin1')
 
 # Limit every dataset to the years 1818-2014 (Range of intra-state-wars)
-polity5_df = polity5_df[(polity5_df['year'] >= 1818) & (polity5_df['year'] <= 2014)]
-resources_df = resources_df[(resources_df['year'] >= 1818) & (resources_df['year'] <= 2014)]
+polity5_df = polity5_df[(polity5_df['year'] >= 1945) & (polity5_df['year'] <= 2010)]
+resources_df = resources_df[(resources_df['year'] >= 1945) & (resources_df['year'] <= 2010)]
 
 # Country Codes --------------------------------------------
-country_codes_df.drop(columns=['StateAbb'], inplace=True)
+# country_codes_df.drop(columns=['StateAbb'], inplace=True)
 # From duplicated().sum() we see only country codes are duplicated
 country_codes_df.drop_duplicates(inplace=True)
 
@@ -71,11 +73,6 @@ wars_df['Initiator'] = wars_df.apply(
 )
 
 wars_df.drop(columns=['SideB'], inplace=True)
-
-# Print how many -8 or -9 values does each column have
-# print('CHECK -> ',wars_df.isin([-8, -9]).sum())
-
-
 # Intra War ------------------------------------------------
 
 
@@ -90,7 +87,6 @@ columns_to_replace = [
 
 for column in columns_to_replace:
     resources_df[column] = resources_df.groupby('ccode')[column].transform(lambda x: x.replace(-9, x.mean()))
-
 # Resources ------------------------------------------------
 
 
@@ -98,10 +94,27 @@ for column in columns_to_replace:
 # Drop these columns with high number of NaN values
 polity5_df.drop(columns=['fragment', 'prior', 'emonth', 'eday', 'eyear', 'eprec', 'interim', 'bmonth', 'bday', 'byear',
                          'bprec', 'post', 'change', 'd5', 'sf', 'regtrans', 'p5', 'cyear'], inplace=True)
-
-# Correlates of war only has records until 2016
-polity5_df = polity5_df[polity5_df['year'] <= 2016]
 # Polity5 ------------------------------------------------
+
+
+# Religion -----------------------------------------------
+religion_df.drop(columns=['Version', 'sourcecode', 'datatype', 'dualrelig', 'total'])
+# Deal with 0 value in the next columns
+columns_to_replace = ['chrstprot', 'chrstcat', 'chrstorth', 'chrstang', 'chrstothr', 'chrstgen', 'judorth', 'jdcons',
+                      'judref', 'judothr', 'judgen', 'islmsun', 'islmshi', 'islmibd', 'islmnat', 'islmalw', 'islmahm',
+                      'islmothr', 'islmgen', 'budmah', 'budthr', 'budothr', 'budgen', 'zorogen', 'hindgen', 'sikhgen',
+                      'shntgen', 'bahgen', 'taogen', 'jaingen', 'confgen', 'syncgen', 'anmgen', 'nonrelig', 'othrgen',
+                      'sumrelig', 'pop', 'chrstprotpct', 'chrstcatpct', 'chrstorthpct', 'chrstangpct', 'chrstothrpct',
+                      'chrstgenpct', 'judorthpct', 'judconspct', 'judrefpct', 'judothrpct', 'judgenpct', 'islmsunpct',
+                      'islmshipct', 'islmibdpct', 'islmnatpct', 'islmalwpct', 'islmahmpct', 'islmothrpct', 'islmgenpct',
+                      'budmahpct', 'budthrpct', 'budothrpct', 'budgenpct', 'zorogenpct', 'hindgenpct', 'sikhgenpct',
+                      'shntgenpct', 'bahgenpct', 'taogenpct', 'jaingenpct', 'confgenpct', 'syncgenpct', 'anmgenpct',
+                      'nonreligpct', 'othrgenpct', 'sumreligpct']
+for column in columns_to_replace:
+    religion_df[column] = religion_df.groupby('name')[column].transform(lambda x: x.replace(0, x.mean()))
+
+
+# Religion -----------------------------------------------
 
 
 # Function to generate a war-year indicator for each country
@@ -120,34 +133,48 @@ def label_war_years(war_df, df):
         for i in range(1, 5):  # Check up to 4 war periods
             if any((wars[f'StartYr{i}'] <= year) & (year <= wars[f'EndYr{i}'])):
                 is_war_year = 1
+                wars.iloc[0].to_dict()
                 break
 
-        labeled_data.append({'ccode': country, 'year': year, 'War_Occurred': is_war_year, 'milex': row['milex'],
-                             'milper': row['milper'], 'irst': row['irst'], 'pec': row['pec'], 'tpop': row['tpop'],
-                             'upop': row['upop'], 'cinc': row['cinc']})
+        labeled_row = {
+            'ccode': country,
+            'year': year,
+            'War_Occurred': is_war_year,
+            'milex': row['milex'],
+            'milper': row['milper'],
+            'irst': row['irst'],
+            'pec': row['pec'],
+            'tpop': row['tpop'],
+            'upop': row['upop'],
+            'cinc': row['cinc'],
+            'V5RegionNum': wars['V5RegionNum'].iloc[0] if not wars.empty else pd.NA
+        }
+
+        labeled_data.append(labeled_row)
 
     return pd.DataFrame(labeled_data)
+
 
 # Label war and non-war years
 labeled_df = label_war_years(wars_df, resources_df)
 # Changed to inner join
-labeled_df = pd.merge(labeled_df, wars_df[['CcodeA', 'WarType', 'Intnl', 'Outcome', 'V5RegionNum']], left_on='ccode',
-                      right_on='CcodeA', how='inner')
-
-labeled_df.drop(columns=['CcodeA'], inplace=True)
 
 # Names for merging with POLITY5
-merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CCode', how='left')
+merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CCode', how='inner')
+
+merged_df = pd.merge(merged_df, religion_df, left_on=['StateAbb', 'year'], right_on=['name', 'year'], how='inner')
 
 # Merge the labeled data with polity5
 merged_df = pd.merge(merged_df, polity5_df, left_on=['StateNme', 'year'], right_on=['country', 'year'],
-                     how='left')
+                     how='inner')
 
 # Drop every redundant, repeated and unnecessary column
-merged_df.drop(columns=['ccode_x', 'ccode_y', 'StateNme', 'scode'], inplace=True)
+merged_df.drop(columns=['ccode_x', 'ccode_y', 'StateNme', 'scode', 'flag'], inplace=True)
 
 # Some names won't be the same due to different naming conventions so we'll get rid of them
 merged_df = merged_df[merged_df['country'].notnull()]
+
+# Print the number of rows there are from 1945 to 2010
 
 # Replace missing values with NaN
 merged_df.replace([-66, -77, -88], pd.NA, inplace=True)
@@ -158,8 +185,33 @@ columns_to_replace = [
 
 for column in columns_to_replace:
     merged_df[column] = merged_df.groupby('CCode')[column].transform(lambda x: x.fillna(x.mean()))
+
+# List of religion percentage columns
+religion_columns = [
+    'chrstprotpct', 'chrstcatpct', 'chrstorthpct', 'chrstangpct', 'chrstothrpct', 'chrstgenpct',
+    'judorthpct', 'judconspct', 'judrefpct', 'judothrpct', 'judgenpct',
+    'islmsunpct', 'islmshipct', 'islmibdpct', 'islmnatpct', 'islmalwpct', 'islmahmpct', 'islmothrpct', 'islmgenpct',
+    'budmahpct', 'budthrpct', 'budothrpct', 'budgenpct',
+    'zorogenpct', 'hindgenpct', 'sikhgenpct', 'shntgenpct', 'bahgenpct', 'taogenpct', 'jaingenpct', 'confgenpct',
+    'syncgenpct', 'anmgenpct', 'nonreligpct', 'othrgenpct', 'sumreligpct'
+]
+
+
+# Countries with a dominant religion (lower entropy) are more peaceful than those with greater religious diversity
+
+# Function to calculate entropy
+def calculate_entropy(row):
+    probabilities = row[religion_columns].values
+    probabilities = probabilities[probabilities > 0]  # Remove zero values
+    probabilities = np.array(probabilities, dtype=np.float64)  # Ensure numpy array type
+    return -np.sum(probabilities * np.log(probabilities))
+
+
+# Calculate entropy for each row
+merged_df['religion_entropy'] = merged_df.apply(calculate_entropy, axis=1)
+
 # Save the updated DataFrame to a CSV file
-merged_df.to_csv('datasets/merged-data.csv', index=False)
+# merged_df.to_csv('datasets/merged-data.csv', index=False)
 
 # ML MODEL --------------------------------------------
 
@@ -178,13 +230,26 @@ features = [
     'tpop',  # Total population
     'upop',  # Urban population
     'cinc',  # Composite Index of National Capabilities
-    'V5RegionNum'  # Intra-War-Dataset
+    'V5RegionNum',  # Intra-War-Dataset
+    'religion_entropy',
+    # Religious Features
+    'chrstprot', 'chrstcat', 'chrstorth', 'chrstang', 'chrstothr', 'chrstgen', 'judorth', 'jdcons', 'judref', 'judothr',
+    'judgen', 'islmsun', 'islmshi', 'islmibd', 'islmnat', 'islmalw', 'islmahm', 'islmothr', 'islmgen', 'budmah',
+    'budthr', 'budothr', 'budgen', 'zorogen', 'hindgen', 'sikhgen', 'shntgen', 'bahgen', 'taogen', 'jaingen', 'confgen',
+    'syncgen', 'anmgen', 'nonrelig', 'othrgen', 'sumrelig', 'pop', 'chrstprotpct', 'chrstcatpct', 'chrstorthpct',
+    'chrstangpct', 'chrstothrpct', 'chrstgenpct', 'judorthpct', 'judconspct', 'judrefpct', 'judothrpct', 'judgenpct',
+    'islmsunpct', 'islmshipct', 'islmibdpct', 'islmnatpct', 'islmalwpct', 'islmahmpct', 'islmothrpct', 'islmgenpct',
+    'budmahpct', 'budthrpct', 'budothrpct', 'budgenpct', 'zorogenpct', 'hindgenpct', 'sikhgenpct', 'shntgenpct',
+    'bahgenpct', 'taogenpct', 'jaingenpct', 'confgenpct', 'syncgenpct', 'anmgenpct', 'nonreligpct', 'othrgenpct',
+    'sumreligpct'
+
 ]
 target = 'War_Occurred'
 
 # Train-test split by year
-train_data = merged_df[merged_df['year'] < 2010]
-test_data = merged_df[merged_df['year'] >= 2010]
+train_data = merged_df[merged_df['year'] < 1997]
+test_data = merged_df[merged_df['year'] >= 1997]
+# 80% of the data is used for training
 
 X_train = train_data[features].dropna()
 y_train = train_data[target].loc[X_train.index]
@@ -201,8 +266,8 @@ scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train_resampled)
 X_test_scaled = scaler.transform(X_test)
 
-# Train model with balanced weights
-model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+# Train a Random Forest model
+model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight='balanced_subsample')
 model.fit(X_train_scaled, y_train_resampled)
 
 # Evaluate on test data
@@ -220,24 +285,43 @@ X_all_scaled = scaler.transform(X_all)
 
 # Predict WarProbability for all rows
 merged_df.loc[X_all.index, 'WarProbability'] = model.predict_proba(X_all_scaled)[:, 1]
+
 # Get only the last year of data in merged_df
-last_year_df = merged_df[merged_df['year'] == 2014]
+last_year_df = merged_df[merged_df['year'] == 2010]
 
 # Print the country, year, and predicted percentage of WarProbability over 0.0 and sort by WarProbability
 print(last_year_df[last_year_df['WarProbability'] > 0.0].sort_values(by='WarProbability', ascending=False)[
           ['country', 'year', 'WarProbability']].to_string())
 # PLOTTING --------------------------------------------
 
-# Select only numeric columns for the correlation matrix
-numeric_columns = merged_df.select_dtypes(include=['number'])
+filtered_features = [
+    'polity2',  # Indicators of political regime type
+    'democ', 'autoc',  # Democracy and autocracy score
+    'durable',  # Uninterrupted years of stability
+    'xrreg', 'xrcomp', 'xropen',  # External regime features
+    'polcomp',  # Political competition
+    'parreg',  # Party regulation
+    'milex',  # Military expenditures
+    'milper',  # Military personnel
+    'irst',  # Industrial production
+    'pec',  # Primary energy consumption
+    'tpop',  # Total population
+    'upop',  # Urban population
+    'cinc',  # Composite Index of National Capabilities
+    'V5RegionNum',  # Intra-War-Dataset
+    'religion_entropy'
+]
 
 # Calculate the correlation matrix
-correlation_matrix = X_all.corr()
-
+X_all_selected = X_all[filtered_features]
+# Calculate the correlation matrix for the selected features
+correlation_matrix = X_all_selected.corr()
 # Plot the heatmap
 plt.figure(figsize=(12, 10))
 sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
 plt.title('Correlation Matrix')
+plt.tight_layout()
+plt.show()
 
 # Feature Importance
 feature_importances = pd.DataFrame({
@@ -245,8 +329,11 @@ feature_importances = pd.DataFrame({
     'Importance': model.feature_importances_
 }).sort_values(by='Importance', ascending=False)
 
-sns.barplot(x='Importance', y='Feature', data=feature_importances)
+top_features = feature_importances.head(15)
+sns.barplot(x='Importance', y='Feature', data=top_features)
 plt.title('Feature Importance')
+plt.tight_layout()
+plt.show()
 
 # Mapping of V5RegionNum to region names
 region_mapping = {
@@ -273,9 +360,11 @@ sns.heatmap(heatmap_data, annot=True, cmap='YlGnBu', cbar_kws={'label': 'Average
 plt.title('Average War Probability by Region')
 plt.xlabel('Region')
 plt.ylabel('Region')
+plt.tight_layout()
+plt.show()
 
 # Filter data for analysis
-analysis_data = last_year_df[['milex', 'pec', 'cinc', 'tpop', 'polity2', 'WarProbability']]
+analysis_data = merged_df[['milex', 'pec', 'cinc', 'tpop', 'polity2', 'WarProbability']]
 
 # Plot 1: Scatter plot for 'tpop' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
@@ -331,5 +420,14 @@ plt.title('Trend of Average War Probability Over the Years')
 plt.xlabel('Year')
 plt.ylabel('Average War Probability')
 plt.grid(True)
+plt.tight_layout()
+
+# Plot the correlation between religion entropy and WarProbability
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=merged_df, x='religion_entropy', y='WarProbability', alpha=0.7, s=20)
+sns.regplot(data=merged_df, x='religion_entropy', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Correlation Between Religion Entropy and War Probability')
+plt.xlabel('Religion Entropy')
+plt.ylabel('War Probability (%)')
 plt.tight_layout()
 plt.show()

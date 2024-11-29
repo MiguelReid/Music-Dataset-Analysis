@@ -5,21 +5,14 @@ Intrastate War Dataset: For civil war occurrences.
 National Material Capabilities (NMC) v6.0: For economic and military indicators.
 Direct Contiguity v3.2: To explore effects of neighboring conflicts.
 Country-Codes: To map country codes to full country names.
-
-----------------------------------------------------------
-
-V5RegionNum: 1=NorthAmerica; 2=South America; 3=Europe; 4=Sub-Saharan Africa; 5=Middle East and North Africa; 6=Asia and Oceania.
-WarType: 4 = Civil war for central control; 5 = Civil war over local issues; 6 = Regional internal; 7 = Intercommunal
-Intnl is the war internationalized?: 0=No; 1=Yes
-OUTCOME: 1 = Side A wins; 2 = Side B wins; 3 = Compromise; 4 = Transformed into another type of war; 5 = Ongoing as of 12/31/2014;
-6 = Stalemate; 7 = Conflict continues at below war level
-Start/End Day,Month...For 2,3,4: When did it start after having stopped (-8 = N/A; -9 = Month Unknown)
+Religion: To investigate the role of religion in conflict.
 """
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from imblearn.over_sampling import SMOTE
+from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, classification_report
 from sklearn.preprocessing import StandardScaler
@@ -35,7 +28,6 @@ polity5_df = polity5_df[(polity5_df['year'] >= 1945) & (polity5_df['year'] <= 20
 resources_df = resources_df[(resources_df['year'] >= 1945) & (resources_df['year'] <= 2010)]
 
 # Country Codes --------------------------------------------
-# country_codes_df.drop(columns=['StateAbb'], inplace=True)
 # From duplicated().sum() we see only country codes are duplicated
 country_codes_df.drop_duplicates(inplace=True)
 
@@ -99,7 +91,6 @@ polity5_df.drop(columns=['fragment', 'prior', 'emonth', 'eday', 'eyear', 'eprec'
 
 # Religion -----------------------------------------------
 religion_df.drop(columns=['Version', 'sourcecode', 'datatype', 'dualrelig', 'total'])
-# Deal with 0 value in the next columns
 columns_to_replace = ['chrstprot', 'chrstcat', 'chrstorth', 'chrstang', 'chrstothr', 'chrstgen', 'judorth', 'jdcons',
                       'judref', 'judothr', 'judgen', 'islmsun', 'islmshi', 'islmibd', 'islmnat', 'islmalw', 'islmahm',
                       'islmothr', 'islmgen', 'budmah', 'budthr', 'budothr', 'budgen', 'zorogen', 'hindgen', 'sikhgen',
@@ -110,6 +101,7 @@ columns_to_replace = ['chrstprot', 'chrstcat', 'chrstorth', 'chrstang', 'chrstot
                       'budmahpct', 'budthrpct', 'budothrpct', 'budgenpct', 'zorogenpct', 'hindgenpct', 'sikhgenpct',
                       'shntgenpct', 'bahgenpct', 'taogenpct', 'jaingenpct', 'confgenpct', 'syncgenpct', 'anmgenpct',
                       'nonreligpct', 'othrgenpct', 'sumreligpct']
+
 for column in columns_to_replace:
     religion_df[column] = religion_df.groupby('name')[column].transform(lambda x: x.replace(0, x.mean()))
 
@@ -157,7 +149,6 @@ def label_war_years(war_df, df):
 
 # Label war and non-war years
 labeled_df = label_war_years(wars_df, resources_df)
-# Changed to inner join
 
 # Names for merging with POLITY5
 merged_df = pd.merge(labeled_df, country_codes_df, left_on='ccode', right_on='CCode', how='inner')
@@ -173,8 +164,6 @@ merged_df.drop(columns=['ccode_x', 'ccode_y', 'StateNme', 'scode', 'flag'], inpl
 
 # Some names won't be the same due to different naming conventions so we'll get rid of them
 merged_df = merged_df[merged_df['country'].notnull()]
-
-# Print the number of rows there are from 1945 to 2010
 
 # Replace missing values with NaN
 merged_df.replace([-66, -77, -88], pd.NA, inplace=True)
@@ -197,9 +186,7 @@ religion_columns = [
 ]
 
 
-# Countries with a dominant religion (lower entropy) are more peaceful than those with greater religious diversity
-
-# Function to calculate entropy
+# Check if a dominant religion (lower entropy) is more peaceful than those with greater religious diversity
 def calculate_entropy(row):
     probabilities = row[religion_columns].values
     probabilities = probabilities[probabilities > 0]  # Remove zero values
@@ -209,9 +196,6 @@ def calculate_entropy(row):
 
 # Calculate entropy for each row
 merged_df['religion_entropy'] = merged_df.apply(calculate_entropy, axis=1)
-
-# Save the updated DataFrame to a CSV file
-# merged_df.to_csv('datasets/merged-data.csv', index=False)
 
 # ML MODEL --------------------------------------------
 
@@ -257,34 +241,41 @@ y_train = train_data[target].loc[X_train.index]
 X_test = test_data[features].dropna()
 y_test = test_data[target].loc[X_test.index]
 
+# Standardize the data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Apply PCA
+pca = PCA(n_components=0.95)  # Retain 95% of the variance
+X_train_pca = pca.fit_transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
+
 # Handle class imbalance using SMOTE
 smote = SMOTE(random_state=42)
-X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
-
-# Scale data
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train_resampled)
-X_test_scaled = scaler.transform(X_test)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train_pca, y_train)
 
 # Train a Random Forest model
 model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight='balanced_subsample')
-model.fit(X_train_scaled, y_train_resampled)
+model.fit(X_train_resampled, y_train_resampled)
 
 # Evaluate on test data
-y_pred = model.predict(X_test_scaled)
-y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
+y_pred = model.predict(X_test_pca)
+y_pred_proba = model.predict_proba(X_test_pca)[:, 1]
 
 print(classification_report(y_test, y_pred))
 print(f"ROC-AUC Score: {roc_auc_score(y_test, y_pred_proba)}")
-
 # Ensure features are properly prepared for the entire dataset
 X_all = merged_df[features].dropna()  # Drop rows with missing feature values
 
 # Scale the features using the trained scaler
 X_all_scaled = scaler.transform(X_all)
 
+# Apply PCA to the scaled features
+X_all_pca = pca.transform(X_all_scaled)
+
 # Predict WarProbability for all rows
-merged_df.loc[X_all.index, 'WarProbability'] = model.predict_proba(X_all_scaled)[:, 1]
+merged_df.loc[X_all.index, 'WarProbability'] = model.predict_proba(X_all_pca)[:, 1]
 
 # Get only the last year of data in merged_df
 last_year_df = merged_df[merged_df['year'] == 2010]
@@ -323,13 +314,31 @@ plt.title('Correlation Matrix')
 plt.tight_layout()
 plt.show()
 
-# Feature Importance
-feature_importances = pd.DataFrame({
-    'Feature': features,
-    'Importance': model.feature_importances_
+# Get the feature importances from the model
+feature_importances = model.feature_importances_
+# Get the names of the PCA components
+# Get the original feature names
+original_feature_names = X_train.columns
+
+# Get the PCA components
+pca_components = pca.components_
+
+# Get the feature names for each principal component
+pca_feature_names = []
+for component in pca_components:
+    # Get the index of the feature with the highest absolute value in the component
+    feature_index = np.argmax(np.abs(component))
+    # Get the corresponding feature name
+    pca_feature_names.append(original_feature_names[feature_index])
+
+# Create a DataFrame for feature importances
+feature_importances_df = pd.DataFrame({
+    'Feature': pca_feature_names,
+    'Importance': feature_importances
 }).sort_values(by='Importance', ascending=False)
 
-top_features = feature_importances.head(15)
+# Plot the top 15 feature importances
+top_features = feature_importances_df.head(15)
 sns.barplot(x='Importance', y='Feature', data=top_features)
 plt.title('Feature Importance')
 plt.tight_layout()
@@ -364,16 +373,19 @@ plt.tight_layout()
 plt.show()
 
 # Filter data for analysis
-analysis_data = merged_df[['milex', 'pec', 'cinc', 'tpop', 'polity2', 'WarProbability']]
+analysis_data = merged_df[
+    ['milex', 'pec', 'tpop', 'polity2', 'WarProbability', 'parreg', 'anmgen', 'islmgen', 'religion_entropy',
+     'bahgenpct']]
 
 # Plot 1: Scatter plot for 'tpop' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='tpop', y='WarProbability', alpha=0.7, color='blue', s=20)
+ax = sns.scatterplot(data=analysis_data, x='tpop', y='WarProbability', alpha=0.7, color='blue', s=20)
 sns.regplot(data=analysis_data, x='tpop', y='WarProbability', scatter=False, color='red', ci=None)
 plt.title('Relationship Between Total Population (tpop) and War Probability')
 plt.xlabel('Total Population (tpop)')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
+plt.show()
 
 # Plot 2: Scatter plot for 'polity2' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
@@ -384,30 +396,39 @@ plt.xlabel('Polity')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
 
-# Plot 2: Scatter plot for 'cinc' vs. 'WarProbability'
+# Plot 2: Scatter plot for 'islmgen' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='cinc', y='WarProbability', alpha=0.7, color='green', s=20)
-sns.regplot(data=analysis_data, x='cinc', y='WarProbability', scatter=False, color='red', ci=None)
-plt.title('Relationship Between Cinc and War Probability')
-plt.xlabel('The Composite Index of National Capability (cinc)')
+sns.scatterplot(data=analysis_data, x='islmgen', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=analysis_data, x='islmgen', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Islmgen and War Probability')
+plt.xlabel('Islmgen')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
 
 # Plot 1: Scatter plot for 'milex' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
 sns.scatterplot(data=analysis_data, x='milex', y='WarProbability', alpha=0.7, color='blue', s=20)
-sns.regplot(data=analysis_data, x='milex', y='WarProbability', scatter=False, color='red', ci=None)
+sns.regplot(data=analysis_data, x='milex', y='WarProbability', scatter=False, color='red', ci=None, ax=ax)
 plt.title('Relationship Between Military Expenditures (milex) and War Probability')
 plt.xlabel('Military Expenditures (milex)')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
 
-# Plot 2: Scatter plot for 'pec' vs. 'WarProbability'
+# Plot 1: Scatter plot for 'parreg' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='pec', y='WarProbability', alpha=0.7, color='green', s=20)
-sns.regplot(data=analysis_data, x='pec', y='WarProbability', scatter=False, color='red', ci=None)
-plt.title('Relationship Between Primary Energy Consumption (pec) and War Probability')
-plt.xlabel('Primary Energy Consumption (pec)')
+sns.scatterplot(data=analysis_data, x='parreg', y='WarProbability', alpha=0.7, color='blue', s=20)
+sns.regplot(data=analysis_data, x='parreg', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Parreg and War Probability')
+plt.xlabel('Parreg (Regulation of Participation)')
+plt.ylabel('War Probability (%)')
+plt.tight_layout()
+
+# Plot 2: Scatter plot for 'anmgen' vs. 'WarProbability'
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=analysis_data, x='anmgen', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=analysis_data, x='anmgen', y='WarProbability', scatter=False, color='red', ci=None)
+plt.title('Relationship Between Anmgen and War Probability')
+plt.xlabel('Anmgen')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
 
@@ -430,4 +451,15 @@ plt.title('Correlation Between Religion Entropy and War Probability')
 plt.xlabel('Religion Entropy')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
+
+# Pairplot
+"""
+sns.pairplot(merged_df[filtered_features + [target]], diag_kind='kde')
+plt.suptitle('Pairplot of Selected Features', y=1.02)
+plt.tight_layout()
+"""
 plt.show()
+
+# Assuming merged_df is your DataFrame
+print(f"Number of data points: {merged_df.shape[0]}")
+print(f"Number of features: {merged_df.shape[1]}")

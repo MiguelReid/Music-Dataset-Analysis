@@ -14,7 +14,7 @@ import seaborn as sns
 from imblearn.over_sampling import SMOTE
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, classification_report
+from sklearn.metrics import roc_auc_score, classification_report, roc_curve, auc
 from sklearn.preprocessing import StandardScaler
 
 country_codes_df = pd.read_csv('datasets/country-codes.csv', encoding='latin1')
@@ -283,7 +283,30 @@ last_year_df = merged_df[merged_df['year'] == 2010]
 # Print the country, year, and predicted percentage of WarProbability over 0.0 and sort by WarProbability
 print(last_year_df[last_year_df['WarProbability'] > 0.0].sort_values(by='WarProbability', ascending=False)[
           ['country', 'year', 'WarProbability']].to_string())
+
+# Dataframe Information
+print(f"Number of data points: {merged_df.shape[0]}")
+print(f"Number of features: {merged_df.shape[1]}")
+
 # PLOTTING --------------------------------------------
+
+# Calculate the ROC curve
+fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+
+# Calculate the AUC
+roc_auc = auc(fpr, tpr)
+
+# Plot the ROC curve
+plt.figure(figsize=(10, 6))
+plt.plot(fpr, tpr, color='blue', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='red', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve')
+plt.tight_layout()
+plt.show()
 
 filtered_features = [
     'polity2',  # Indicators of political regime type
@@ -374,63 +397,49 @@ plt.show()
 
 # Filter data for analysis
 analysis_data = merged_df[
-    ['milex', 'pec', 'tpop', 'polity2', 'WarProbability', 'parreg', 'anmgen', 'islmgen', 'religion_entropy',
-     'bahgenpct']]
+    ['tpop', 'polity2', 'WarProbability', 'parreg', 'islmgen', 'religion_entropy']]
 
-# Plot 1: Scatter plot for 'tpop' vs. 'WarProbability'
+filtered_data = analysis_data[analysis_data['WarProbability'] > 0.00]  # Exclude near-zero values
+
+# Scatter plot for 'tpop' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-ax = sns.scatterplot(data=analysis_data, x='tpop', y='WarProbability', alpha=0.7, color='blue', s=20)
-sns.regplot(data=analysis_data, x='tpop', y='WarProbability', scatter=False, color='red', ci=None)
+ax = sns.scatterplot(data=filtered_data, x='tpop', y='WarProbability', alpha=0.7, color='blue', s=20)
+sns.regplot(data=filtered_data, x='tpop', y='WarProbability', scatter=False, color='red', ci=None)
 plt.title('Relationship Between Total Population (tpop) and War Probability')
 plt.xlabel('Total Population (tpop)')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
 plt.show()
 
-# Plot 2: Scatter plot for 'polity2' vs. 'WarProbability'
+# Scatter plot for 'polity2' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='polity2', y='WarProbability', alpha=0.7, color='green', s=20)
-sns.regplot(data=analysis_data, x='polity2', y='WarProbability', scatter=False, color='red', ci=None)
+sns.scatterplot(data=filtered_data, x='polity2', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=filtered_data, x='polity2', y='WarProbability', scatter=False, color='red', ci=None)
 plt.title('Relationship Between Polity and War Probability')
 plt.xlabel('Polity')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
+plt.show()
 
-# Plot 2: Scatter plot for 'islmgen' vs. 'WarProbability'
+# Scatter plot for 'islmgen' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='islmgen', y='WarProbability', alpha=0.7, color='green', s=20)
-sns.regplot(data=analysis_data, x='islmgen', y='WarProbability', scatter=False, color='red', ci=None)
+sns.scatterplot(data=filtered_data, x='islmgen', y='WarProbability', alpha=0.7, color='green', s=20)
+sns.regplot(data=filtered_data, x='islmgen', y='WarProbability', scatter=False, color='red', ci=None)
 plt.title('Relationship Between Islmgen and War Probability')
 plt.xlabel('Islmgen')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
+plt.show()
 
-# Plot 1: Scatter plot for 'milex' vs. 'WarProbability'
+# Scatter plot for 'parreg' vs. 'WarProbability'
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='milex', y='WarProbability', alpha=0.7, color='blue', s=20)
-sns.regplot(data=analysis_data, x='milex', y='WarProbability', scatter=False, color='red', ci=None, ax=ax)
-plt.title('Relationship Between Military Expenditures (milex) and War Probability')
-plt.xlabel('Military Expenditures (milex)')
-plt.ylabel('War Probability (%)')
-plt.tight_layout()
-
-# Plot 1: Scatter plot for 'parreg' vs. 'WarProbability'
-plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='parreg', y='WarProbability', alpha=0.7, color='blue', s=20)
-sns.regplot(data=analysis_data, x='parreg', y='WarProbability', scatter=False, color='red', ci=None)
+sns.scatterplot(data=filtered_data, x='parreg', y='WarProbability', alpha=0.7, color='blue', s=20)
+sns.regplot(data=filtered_data, x='parreg', y='WarProbability', scatter=False, color='red', ci=None)
 plt.title('Parreg and War Probability')
 plt.xlabel('Parreg (Regulation of Participation)')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
-
-# Plot 2: Scatter plot for 'anmgen' vs. 'WarProbability'
-plt.figure(figsize=(10, 6))
-sns.scatterplot(data=analysis_data, x='anmgen', y='WarProbability', alpha=0.7, color='green', s=20)
-sns.regplot(data=analysis_data, x='anmgen', y='WarProbability', scatter=False, color='red', ci=None)
-plt.title('Relationship Between Anmgen and War Probability')
-plt.xlabel('Anmgen')
-plt.ylabel('War Probability (%)')
-plt.tight_layout()
+plt.show()
 
 # Calculate the average WarProbability for each year
 avg_war_prob_by_year = merged_df.groupby('year')['WarProbability'].mean().reset_index()
@@ -442,24 +451,22 @@ plt.xlabel('Year')
 plt.ylabel('Average War Probability')
 plt.grid(True)
 plt.tight_layout()
+plt.show()
 
 # Plot the correlation between religion entropy and WarProbability
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=merged_df, x='religion_entropy', y='WarProbability', alpha=0.7, s=20)
-sns.regplot(data=merged_df, x='religion_entropy', y='WarProbability', scatter=False, color='red', ci=None)
+sns.scatterplot(data=filtered_data, x='religion_entropy', y='WarProbability', alpha=0.7, s=20)
+sns.regplot(data=filtered_data, x='religion_entropy', y='WarProbability', scatter=False, color='red', ci=None)
 plt.title('Correlation Between Religion Entropy and War Probability')
 plt.xlabel('Religion Entropy')
 plt.ylabel('War Probability (%)')
 plt.tight_layout()
+plt.show()
 
 # Pairplot
 """
 sns.pairplot(merged_df[filtered_features + [target]], diag_kind='kde')
 plt.suptitle('Pairplot of Selected Features', y=1.02)
 plt.tight_layout()
-"""
 plt.show()
-
-# Assuming merged_df is your DataFrame
-print(f"Number of data points: {merged_df.shape[0]}")
-print(f"Number of features: {merged_df.shape[1]}")
+"""

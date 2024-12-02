@@ -185,14 +185,12 @@ religion_columns = [
     'syncgenpct', 'anmgenpct', 'nonreligpct', 'othrgenpct', 'sumreligpct'
 ]
 
-
 # Check if a dominant religion (lower entropy) is more peaceful than those with greater religious diversity
 def calculate_entropy(row):
     probabilities = row[religion_columns].values
     probabilities = probabilities[probabilities > 0]  # Remove zero values
     probabilities = np.array(probabilities, dtype=np.float64)  # Ensure numpy array type
     return -np.sum(probabilities * np.log(probabilities))
-
 
 # Calculate entropy for each row
 merged_df['religion_entropy'] = merged_df.apply(calculate_entropy, axis=1)
@@ -464,9 +462,8 @@ plt.tight_layout()
 plt.show()
 
 # Pairplot
-"""
 sns.pairplot(merged_df[filtered_features + [target]], diag_kind='kde')
 plt.suptitle('Pairplot of Selected Features', y=1.02)
 plt.tight_layout()
 plt.show()
-"""
+
